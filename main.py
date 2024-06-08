@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import xml.etree.ElementTree as ET
+import os
 
 def register_images(ref_image, test_image, ratio_thresh=0.7):
     # SIFT algılama
@@ -107,51 +108,76 @@ def compare_defects(detected_defects, xml_defects, threshold=10):
                 break
     return correct_detections
 
+def get_files_from_directory(directory, file_extension):
+    return [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(file_extension)]
+
 # Ana fonksiyon
-def main(ref_image_path, test_image_path, xml_path, diff_thresh=10, morph_kernel_size=1, area_threshold=100, ratio_thresh=0.7):
+def main(ref_image_path, test_image_dirs, xml_files_dirs, diff_thresh=10, morph_kernel_size=1, area_threshold=100, ratio_thresh=0.7):
     # Görüntüleri yükle
     ref_image = cv2.imread(ref_image_path, cv2.IMREAD_GRAYSCALE)
-    test_image = cv2.imread(test_image_path, cv2.IMREAD_GRAYSCALE)
-    
     if ref_image is None:
         print(f"Failed to load reference image from {ref_image_path}")
         return
-    if test_image is None:
-        print(f"Failed to load test image from {test_image_path}")
-        return
-    
-    # Görüntüleri hizala
-    registered_test_image = register_images(ref_image, test_image, ratio_thresh)
-    if registered_test_image is None:
-        print("Image registration failed.")
-        return
-    
-    # Kusurları tespit et
-    defect_image, detected_defects = detect_defects(ref_image, registered_test_image, diff_thresh, morph_kernel_size, area_threshold)
-    
-    # XML'den kusurları yükle
-    xml_defects = parse_defects_from_xml(xml_path)
-    
-    # Kusurları karşılaştır
-    correct_detections = compare_defects(detected_defects, xml_defects, threshold=30)
-    print(f"Correctly detected defects: {correct_detections} / {len(xml_defects)}")
-    
-    # Görüntüleri 1280x720 çözünürlüğe yeniden boyutlandır
-    registered_test_image_resized = cv2.resize(registered_test_image, (1280, 720))
-    defect_image_resized = cv2.resize(defect_image, (1280, 720))
-    
-    # Sonuçları göster
-    cv2.imshow("Registered Test Image", registered_test_image_resized)
-    cv2.imshow("Defects", defect_image_resized)
-    
-    # Klavyeden herhangi bir tuşa basıldığında işlemi sonlandır
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+
+    test_image_paths = []
+    xml_paths = []
+
+    for test_image_dir in test_image_dirs:
+        test_image_paths.extend(get_files_from_directory(test_image_dir, ".jpg"))
+    print(len(test_image_paths))
+    for xml_files_dir in xml_files_dirs:
+        xml_paths.extend(get_files_from_directory(xml_files_dir, ".xml"))
+
+    # Sadece ilk 20 dosyayı al
+    #test_image_paths = test_image_paths[:20]
+    #xml_paths = xml_paths[:20]
+
+    for test_image_path, xml_path in zip(test_image_paths, xml_paths):
+        test_image = cv2.imread(test_image_path, cv2.IMREAD_GRAYSCALE)
+        if test_image is None:
+            print(f"Failed to load test image from {test_image_path}")
+            continue
+
+        # Görüntüleri hizala
+        registered_test_image = register_images(ref_image, test_image, ratio_thresh)
+        if registered_test_image is None:
+            print("Image registration failed.")
+            continue
+
+        # Kusurları tespit et
+        defect_image, detected_defects = detect_defects(ref_image, registered_test_image, diff_thresh, morph_kernel_size, area_threshold)
+
+        # XML'den kusurları yükle
+        xml_defects = parse_defects_from_xml(xml_path)
+
+        # Kusurları karşılaştır
+        correct_detections = compare_defects(detected_defects, xml_defects, threshold=30)
+        print(f"Correctly detected defects: {correct_detections} / {len(xml_defects)}")
+
+        # Görüntüleri 1280x720 çözünürlüğe yeniden boyutlandır
+        registered_test_image_resized = cv2.resize(registered_test_image, (1280, 720))
+        defect_image_resized = cv2.resize(defect_image, (1280, 720))
+
+        # Sonuçları göster
+        cv2.imshow("Registered Test Image", registered_test_image_resized)
+        cv2.imshow("Defects", defect_image_resized)
+
+        # Klavyeden herhangi bir tuşa basıldığında işlemi sonlandır
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
 # Dosya yollarını belirleyin
 ref_image_path = r"C:\Users\New\Desktop\Yazilim\goruntu_final\01.JPG"
-test_image_path = r'C:\Users\New\Desktop\Yazilim\goruntu_final\01_missing_hole_01.jpg'
-xml_path = r'C:\Users\New\Desktop\Yazilim\goruntu_final\01_missing_hole_01.xml'
+test_image_dirs = [
+    r'C:\Users\New\Desktop\Yazilim\goruntu_final\rotation\Missing_hole_rotation',
+    r'C:\Users\New\Desktop\Yazilim\goruntu_final\rotation\Mouse_bite_rotation',
+    r'C:\Users\New\Desktop\Yazilim\goruntu_final\rotation\Open_circuit_rotation'
+]
+xml_files_dirs = [
+    r'C:\Users\New\Desktop\Yazilim\goruntu_final\Annotations\Missing_hole',
+    r'C:\Users\New\Desktop\Yazilim\goruntu_final\Annotations\Mouse_bite',
+    r'C:\Users\New\Desktop\Yazilim\goruntu_final\Annotations\Open_circuit'
+]
 
 # Ana fonksiyonu çalıştır
-main(ref_image_path, test_image_path, xml_path, diff_thresh=10, morph_kernel_size=1, area_threshold=50)
+main(ref_image_path, test_image_dirs, xml_files_dirs, diff_thresh=10, morph_kernel_size=1, area_threshold=50)
