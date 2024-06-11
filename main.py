@@ -10,7 +10,7 @@ def register_images(ref_image, test_image, ratio_thresh=0.7):
     keypoints2, descriptors2 = sift.detectAndCompute(test_image, None)
 
     if descriptors1 is None or descriptors2 is None:
-        print("SIFT failed to find descriptors.")
+        print("SIFT tanımlayıcıları bulamadı.")
         return None
 
     # FLANN tabanlı eşleştirici
@@ -26,7 +26,7 @@ def register_images(ref_image, test_image, ratio_thresh=0.7):
             good_matches.append(m)
 
     if len(good_matches) == 0:
-        print("No good matches found.")
+        print("İyi eşleşme bulunamadı.")
         return None
 
     # Keypoint'lerden koordinatları çıkar
@@ -36,7 +36,7 @@ def register_images(ref_image, test_image, ratio_thresh=0.7):
     # Homografi matrisini hesapla
     H, _ = cv2.findHomography(dst_pts, src_pts, cv2.RANSAC, 5.0)
     if H is None:
-        print("Homography calculation failed.")
+        print("Homografi hesaplaması başarısız oldu.")
         return None
 
     height, width = ref_image.shape
@@ -44,7 +44,7 @@ def register_images(ref_image, test_image, ratio_thresh=0.7):
 
     return registered_image
 
-def detect_defects(ref_image, test_image, diff_thresh=10, morph_kernel_size=1, area_threshold=100):
+def detect_defects(ref_image, test_image, test_image_filename, diff_thresh=10, morph_kernel_size=1, area_threshold=100):
     # Fark görüntüsü oluştur
     diff_image = cv2.absdiff(ref_image, test_image)
     
@@ -61,11 +61,9 @@ def detect_defects(ref_image, test_image, diff_thresh=10, morph_kernel_size=1, a
     
     # Kusurları işaretle
     defect_image = ref_image.copy()
-    cv2.drawContours(defect_image, contours, -1, (0, 0, 255), 2)
-
     detected_defects = []
     # Kontur sayısını ve min-max koordinatlarını yazdır
-    print("Detected defects:")
+    print(f"Tespit edilen kusurlar{test_image_filename}:")
     defect_counter = 1
     for contour in contours:
         if cv2.contourArea(contour) > area_threshold:
@@ -73,14 +71,15 @@ def detect_defects(ref_image, test_image, diff_thresh=10, morph_kernel_size=1, a
             y_coords = [point[0][1] for point in contour]
             min_x, max_x = min(x_coords), max(x_coords)
             min_y, max_y = min(y_coords), max(y_coords)
-            print(f"Defect {defect_counter}:")
-            print(f"   Min Coordinate: ({min_x}, {min_y})")
-            print(f"   Max Coordinate: ({max_x}, {max_y})")
+            print(f"Kusur {defect_counter}:")
+            print(f"   Minimum Koordinat: ({min_x}, {min_y})")
+            print(f"   Maksimum Koordinat: ({max_x}, {max_y})")
             detected_defects.append((min_x, min_y, max_x, max_y))
+            cv2.rectangle(defect_image, (min_x, min_y), (max_x, max_y), (0, 0, 255), 2)  # Kusurları dikdörtgen içine al
             defect_counter += 1
 
     if defect_counter == 1:
-        print("No defects detected.")
+        print("Hiçbir kusur tespit edilmedi.")
     return defect_image, detected_defects
 
 def parse_defects_from_xml(xml_path):
@@ -111,12 +110,11 @@ def compare_defects(detected_defects, xml_defects, threshold=10):
 def get_files_from_directory(directory, file_extension):
     return [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(file_extension)]
 
-# Ana fonksiyon
 def main(ref_image_path, test_image_dirs, xml_files_dirs, diff_thresh=10, morph_kernel_size=1, area_threshold=100, ratio_thresh=0.7):
     # Görüntüleri yükle
     ref_image = cv2.imread(ref_image_path, cv2.IMREAD_GRAYSCALE)
     if ref_image is None:
-        print(f"Failed to load reference image from {ref_image_path}")
+        print(f"Referans görseli yüklenemedi {ref_image_path}")
         return
 
     test_image_paths = []
@@ -135,49 +133,48 @@ def main(ref_image_path, test_image_dirs, xml_files_dirs, diff_thresh=10, morph_
     for test_image_path, xml_path in zip(test_image_paths, xml_paths):
         test_image = cv2.imread(test_image_path, cv2.IMREAD_GRAYSCALE)
         if test_image is None:
-            print(f"Failed to load test image from {test_image_path}")
+            print(f"Test görüntüsü yüklenemedi {test_image_path}")
             continue
 
         # Görüntüleri hizala
         registered_test_image = register_images(ref_image, test_image, ratio_thresh)
         if registered_test_image is None:
-            print("Image registration failed.")
+            print("Resim kaydı başarısız oldu.")
             continue
 
         # Kusurları tespit et
-        defect_image, detected_defects = detect_defects(ref_image, registered_test_image, diff_thresh, morph_kernel_size, area_threshold)
+        test_image_filename = os.path.basename(test_image_path)
+        defect_image, detected_defects = detect_defects(ref_image, registered_test_image, test_image_filename, diff_thresh, morph_kernel_size, area_threshold)
 
         # XML'den kusurları yükle
         xml_defects = parse_defects_from_xml(xml_path)
 
         # Kusurları karşılaştır
         correct_detections = compare_defects(detected_defects, xml_defects, threshold=30)
-        print(f"Correctly detected defects: {correct_detections} / {len(xml_defects)}")
+        print(f"Doğru tespit edilen kusurlar: {correct_detections} / {len(xml_defects)}")
 
         # Görüntüleri 1280x720 çözünürlüğe yeniden boyutlandır
         registered_test_image_resized = cv2.resize(registered_test_image, (1280, 720))
         defect_image_resized = cv2.resize(defect_image, (1280, 720))
 
+        # Dosya adını al
+        test_image_filename = os.path.basename(test_image_path)
+
         # Sonuçları göster
-        cv2.imshow("Registered Test Image", registered_test_image_resized)
-        cv2.imshow("Defects", defect_image_resized)
+        cv2.imshow(f"Test Görüntüsü : {test_image_filename}", registered_test_image_resized)
+        cv2.imshow("Kusurlar", defect_image_resized)
 
         # Klavyeden herhangi bir tuşa basıldığında işlemi sonlandır
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-# Dosya yollarını belirleyin
-ref_image_path = r"C:\Users\New\Desktop\Yazilim\goruntu_final\01.JPG"
-test_image_dirs = [
-    r'C:\Users\New\Desktop\Yazilim\goruntu_final\rotation\Missing_hole_rotation',
-    r'C:\Users\New\Desktop\Yazilim\goruntu_final\rotation\Mouse_bite_rotation',
-    r'C:\Users\New\Desktop\Yazilim\goruntu_final\rotation\Open_circuit_rotation'
-]
-xml_files_dirs = [
-    r'C:\Users\New\Desktop\Yazilim\goruntu_final\Annotations\Missing_hole',
-    r'C:\Users\New\Desktop\Yazilim\goruntu_final\Annotations\Mouse_bite',
-    r'C:\Users\New\Desktop\Yazilim\goruntu_final\Annotations\Open_circuit'
-]
-
 # Ana fonksiyonu çalıştır
-main(ref_image_path, test_image_dirs, xml_files_dirs, diff_thresh=10, morph_kernel_size=1, area_threshold=50)
+main(r"C:\Users\New\Desktop\Yazilim\goruntu_final\01.JPG", [
+    'rotation/Missing_hole_rotation',
+    'rotation/Mouse_bite_rotation',
+    'rotation/Open_circuit_rotation'
+], [
+    'Annotations/Missing_hole',
+    'Annotations/Mouse_bite',
+    'Annotations/Open_circuit'
+], diff_thresh=10, morph_kernel_size=1, area_threshold=50)
